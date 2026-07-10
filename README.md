@@ -1,9 +1,10 @@
-# Prediction Scraping Bot
+# Multi-Source Scraper con Soporte Anti-Bloqueos
 
-Este bot se ejecuta de forma automática mediante GitHub Actions, analiza fuentes de apuestas de valor y envía alertas filtradas a Telegram.
+Este repositorio ejecuta un sistema de rastreo cronometrado para pronósticos deportivos utilizando proxies residenciales premium de ScraperAPI.
 
-## Configuración Obligatoria (Secrets)
-Para que el bot funcione sin exponer tus llaves, ve a la configuración de tu repositorio desde el navegador de tu móvil o la app:
-1. Entra a **Settings** > **Secrets and variables** > **Actions**.
-2. Crea un **New repository secret** con el nombre `TELEGRAM_TOKEN` (Token que te da el @BotFather).
-3. Crea otro llamado `TELEGRAM_CHAT_ID` (Tu ID de usuario o el ID del canal/grupo con el signo menos `-` incluido si aplica).
+## Integración de Parámetros Obligatorios
+Para el correcto funcionamiento en GitHub Actions, debes dar de alta los siguientes secretos en el panel web/móvil del proyecto (**Settings** > **Secrets and variables** > **Actions**):
+
+1. `TELEGRAM_TOKEN`: El identificador numérico secreto de tu bot.
+2. `TELEGRAM_CHAT_ID`: Tu identificador único o ID de canal de Telegram.
+3. `SCRAPER_API_KEY`: La clave maestra de autenticación provista por ScraperAPI.
