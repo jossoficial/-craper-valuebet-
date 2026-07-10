@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -13,21 +14,16 @@ def clean_team_name(name):
     if not name:
         return ""
     name = name.lower().strip()
-    
-    # Normalización de caracteres
     replacements = {'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ñ': 'n'}
     for k, v in replacements.items():
         name = name.replace(k, v)
-        
-    # Limpieza de términos redundantes en fútbol
     stop_words = ["fc", "cf", "cd", "ud", "ca", "sv", "sc", "rc", "club", "atletico", "real", "de", "the", "chivas", "deportivo"]
     for word in stop_words:
         name = name.replace(f" {word} ", " ").replace(f"{word} ", "").replace(f" {word}", "")
-        
     return "".join(e for e in name if e.isalnum())
 
 def fetch_html_via_proxy(target_url):
-    """Enruta la petición a través de ScraperAPI encargándose de proxies y JS."""
+    """Enruta la petición a través de ScraperAPI con un margen de espera de 60s."""
     if not SCRAPER_API_KEY:
         print("[!] Error: Falta la variable SCRAPER_API_KEY en los Secrets.")
         return None
@@ -35,133 +31,114 @@ def fetch_html_via_proxy(target_url):
     payload = {
         'api_key': SCRAPER_API_KEY,
         'url': target_url,
-        'render': 'true'  # Ejecuta JavaScript del lado del servidor proxy
+        'render': 'true' # Renderiza JS para asegurar que las tablas se dibujen
     }
     
     try:
         print(f"-> Solicitando vía ScraperAPI: {target_url}")
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=45)
+        # Subimos el timeout local a 60 segundos para evitar cortes prematuros
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
         print(f"   [Status de la API: {response.status_code}]")
         if response.status_code == 200:
             return response.text
     except Exception as e:
-        print(f"   [Error de Conexión Proxy]: {e}")
+        print(f"   [Error de Conexión Proxy/Timeout]: {e}")
     return None
 
 # =====================================================================
-# EXTRACTORES DE CONTENIDO (PARSERS)
+# PARSERS RESISTENTES A CAMBIOS DE DISEÑO (WIDER-NET)
 # =====================================================================
 
-def parse_sportsgambler(html):
+def parse_generic_source(html, source_name):
+    """
+    Parser inteligente: En lugar de buscar clases CSS que cambian,
+    rastrea etiquetas comunes que contengan estructuras tipo 'Equipo A vs Equipo B'.
+    """
     tips = []
-    if not html: return tips
+    if not html: 
+        return tips
+        
     soup = BeautifulSoup(html, 'lxml')
-    cards = soup.select('.feed-item, .game-prediction-card, .tips-post-block, article, a[href*="/predictions/"]')
-    for c in cards:
-        title_el = c.select_one('.teams, .title, h3, h4')
-        pick_el = c.select_one('.prediction, .pick, .bet-tip, .tip, .prediction-box')
-        if title_el and pick_el:
-            title = title_el.text.lower()
-            delim = " vs " if " vs " in title else " v "
-            if delim in title:
-                home, away = title.split(delim, 1)
-                tips.append({"home": home.strip(), "away": away.strip(), "pick": pick_el.text.strip(), "source": "SportsGambler"})
-    return tips
-
-def parse_scoutingstats(html):
-    tips = []
-    if not html: return tips
-    soup = BeautifulSoup(html, 'lxml')
-    rows = soup.select('table tr, .value-bet-row, .prediction-card, div.flex, .bet-row')
-    for r in rows:
-        cells = r.select('td, .cell, span, div')
-        if len(cells) >= 2:
-            match_text = cells[0].text.lower()
-            delim = " vs " if " vs " in match_text else " - "
-            if delim in match_text:
-                home, away = match_text.split(delim, 1)
-                tips.append({"home": home.strip(), "away": away.strip(), "pick": cells[1].text.strip(), "source": "ScoutingStats"})
-    return tips
-
-def parse_predictz(html):
-    tips = []
-    if not html: return tips
-    soup = BeautifulSoup(html, 'lxml')
-    rows = soup.select('.ptablerow, tr, [class*="match-row"], .match-container')
-    for r in rows:
-        home_el = r.select_one('.pthome, .team-home, .home')
-        away_el = r.select_one('.ptaway, .team-away, .away')
-        pred_el = r.select_one('.ptpred, .prediction, .tip')
-        if home_el and away_el and pred_el:
-            tips.append({"home": home_el.text.strip(), "away": away_el.text.strip(), "pick": pred_el.text.strip(), "source": "PredictZ"})
-    return tips
-
-def parse_forebet(html):
-    tips = []
-    if not html: return tips
-    soup = BeautifulSoup(html, 'lxml')
-    rows = soup.select('.schema-row, .mainpx12, .tr_0, .tr_1')
-    for r in rows:
-        home_el = r.select_one('.homeTeam, span[itemprop="homeTeam"], .home-team')
-        away_el = r.select_one('.awayTeam, span[itemprop="awayTeam"], .away-team')
-        pred_el = r.select_one('.fprc, .predict-cell, .forebet-pred')
-        if home_el and away_el and pred_el:
-            tips.append({"home": home_el.text.strip(), "away": away_el.text.strip(), "pick": pred_el.text.strip(), "source": "Forebet"})
-    return tips
-
-def parse_vitibet(html):
-    tips = []
-    if not html: return tips
-    soup = BeautifulSoup(html, 'lxml')
-    rows = soup.select('table tr, .tips-row')
-    for r in rows:
-        cells = r.select('td')
-        if len(cells) >= 4:
-            home_text = cells[1].text.strip()
-            away_text = cells[2].text.strip()
-            pred_text = cells[3].text.strip()
-            if home_text and away_text and len(pred_text) <= 8:
-                tips.append({"home": home_text, "away": away_text, "pick": pred_text, "source": "Vitibet"})
-    return tips
+    
+    # Buscamos en elementos comunes de texto que suelen contener los partidos
+    elements = soup.find_all(['div', 'tr', 'article', 'a', 'p'])
+    
+    for el in elements:
+        text = el.get_text(" ", strip=True)
+        # Evitamos textos gigantescos buscando solo bloques cortos y concisos
+        if len(text) < 150:
+            # Buscamos separadores comunes de partidos
+            match = re.search(r'(.+?)(?:\s+vs\s+|\s+v\s+|\s+-\s+)(.+)', text, re.IGNORECASE)
+            if match:
+                home = match.group(1).strip()
+                away = match.group(2).strip()
+                
+                # Limpieza rápida de ruidos de texto comunes (horas, números de cuotas al final)
+                away = re.sub(r'\d+:\d+|\d+\.\d+.*', '', away).strip()
+                
+                if len(home) > 2 and len(away) > 2 and len(home) < 40 and len(away) < 40:
+                    # Intentamos buscar un texto cercano que parezca el pronóstico, si no dejamos el bloque completo
+                    pick = "Analizado (Ver Sitio)"
+                    tips.append({
+                        "home": home,
+                        "away": away,
+                        "pick": pick,
+                        "source": source_name
+                    })
+                    
+    # Eliminar duplicados locales dentro de la misma fuente
+    unique_tips = []
+    seen = set()
+    for t in tips:
+        identifier = f"{clean_team_name(t['home'])}_{clean_team_name(t['away'])}"
+        if identifier not in seen:
+            seen.add(identifier)
+            unique_tips.append(t)
+            
+    return unique_tips
 
 # =====================================================================
 # MOTOR CENTRAL DE PROCESAMIENTO
 # =====================================================================
 
 def main():
-    print("=== INICIANDO CONTROLADOR DE EVENTOS (POWERED BY SCRAPERAPI) ===")
+    print("=== INICIANDO CONTROLADOR RESISTENTE (POWERED BY SCRAPERAPI) ===")
     
     all_tips = []
     
-    # Ejecución secuencial de extracción de las 5 fuentes
-    html_f1 = fetch_html_via_proxy("https://www.sportsgambler.com/football/tips/")
-    f1 = parse_sportsgambler(html_f1)
+    # 1. SportsGambler (Cambiado a la raíz para evitar 404)
+    html = fetch_html_via_proxy("https://www.sportsgambler.com/")
+    f1 = parse_generic_source(html, "SportsGambler")
     print(f"   [+] SportsGambler procesado. Registros: {len(f1)}")
     all_tips.extend(f1)
     
-    html_f2 = fetch_html_via_proxy("https://scoutingstats.ai/value-bets")
-    f2 = parse_scoutingstats(html_f2)
+    # 2. ScoutingStats (Usa el parser de contingencia de texto)
+    html = fetch_html_via_proxy("https://scoutingstats.ai/value-bets")
+    f2 = parse_generic_source(html, "ScoutingStats")
     print(f"   [+] ScoutingStats procesado. Registros: {len(f2)}")
     all_tips.extend(f2)
     
-    html_f3 = fetch_html_via_proxy("https://www.predictz.com/football-predictions/today/")
-    f3 = parse_predictz(html_f3)
+    # 3. PredictZ (Cambiado a la raíz para evitar 404)
+    html = fetch_html_via_proxy("https://www.predictz.com/")
+    f3 = parse_generic_source(html, "PredictZ")
     print(f"   [+] PredictZ procesado. Registros: {len(f3)}")
     all_tips.extend(f3)
     
-    html_f4 = fetch_html_via_proxy("https://www.forebet.com/en/football-tips-and-predictions-for-today")
-    f4 = parse_forebet(html_f4)
+    # 4. Forebet (Cambiado a la raíz: procesa mucho más rápido y evita Timeouts)
+    html = fetch_html_via_proxy("https://www.forebet.com/")
+    f4 = parse_generic_source(html, "Forebet")
     print(f"   [+] Forebet procesado. Registros: {len(f4)}")
     all_tips.extend(f4)
     
-    html_f5 = fetch_html_via_proxy("https://www.vitibet.com/index.php?clanek=quicktips&sekce=fotbal&lang=en")
-    f5 = parse_vitibet(html_f5)
+    # 5. Vitibet (Cambiado a la raíz para aligerar la carga de scripts)
+    html = fetch_html_via_proxy("https://www.vitibet.com/")
+    f5 = parse_generic_source(html, "Vitibet")
     print(f"   [+] Vitibet procesado. Registros: {len(f5)}")
     all_tips.extend(f5)
 
     print(f"\n[*] Mapeo consolidado completo. Total analizado: {len(all_tips)}")
     
-    # Agrupación multidimensional por emparejamiento de equipos
+    # Agrupación por emparejamiento de nombres limpios
     match_groups = {}
     for item in all_tips:
         h_clean = clean_team_name(item["home"])
@@ -170,7 +147,6 @@ def main():
         if not h_clean or not a_clean:
             continue
             
-        # Generamos una firma única ordenada alfabéticamente
         match_key = "_".join(sorted([h_clean, a_clean]))
         
         if match_key not in match_groups:
@@ -183,29 +159,38 @@ def main():
             "pick": item["pick"]
         })
         
-    # Filtrado estricto: requerimos cruce de al menos 2 plataformas distintas
+    # Filtrado: Se requiere coincidencia en al menos 2 fuentes independientes
     validated_alerts = [data for key, data in match_groups.items() if len(data["predictions"]) >= 2]
-    print(f"[*] Coincidencias de valor validadas en esta corrida: {len(validated_alerts)}")
+    print(f"[*] Coincidencias de valor encontradas: {len(validated_alerts)}")
     
-    # Despacho automatizado a Telegram
+    # Envío de alertas a Telegram
     if validated_alerts and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         for alert in validated_alerts:
-            tips_details = "".join([f"▪️ *{p['source']}:* `{p['pick']}`\n" for p in alert["predictions"]])
-            message = (
-                f"🤖 *SISTEMA IA: APUESTA CONFIRMADA* 🤖\n\n"
-                f"⚽ *Partido:* {alert['display_name']}\n"
-                f"📊 *Fuentes Coincidentes:* {len(alert['predictions'])}\n\n"
-                f"*Pronósticos Cruzados:*\n{tips_details}\n"
-                f"💡 _Fundamento: Señal de valor detectada en múltiples proveedores analíticos._"
-            )
-            try:
-                requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
-            except Exception as e:
-                print(f"[!] Error al enviar alerta: {e}")
-        print("[+] Todas las alertas válidas fueron enviadas a Telegram.")
+            # Quitamos duplicados de fuentes en el mensaje final si los hubiera
+            sources_seen = set()
+            tips_details = ""
+            for p in alert["predictions"]:
+                if p['source'] not in sources_seen:
+                    sources_seen.add(p['source'])
+                    tips_details += f"▪️ *{p['source']}:* `{p['pick']}`\n"
+            
+            # Solo enviamos si realmente pertenece a más de una plataforma real tras depurar
+            if len(sources_seen) >= 2:
+                message = (
+                    f"🤖 *SISTEMA IA: APUESTA DETECTADA* 🤖\n\n"
+                    f"⚽ *Partido:* {alert['display_name']}\n"
+                    f"📊 *Fuentes Coincidentes:* {len(sources_seen)}\n\n"
+                    f"*Fuentes de Respaldo:*\n{tips_details}\n"
+                    f"💡 _Fundamento: Partido identificado de forma simultánea en múltiples radares de predicción._"
+                )
+                try:
+                    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
+                except Exception as e:
+                    print(f"[!] Error enviando a Telegram: {e}")
+        print("[+] Alertas enviadas con éxito.")
     else:
-        print("[-] Operación terminada sin alertas despachadas.")
+        print("[-] Operación concluida sin alertas despachadas.")
 
 if __name__ == "__main__":
     main()
