@@ -2,10 +2,10 @@ name: Sports Betting Multi-Scraper Bot
 
 on:
   schedule:
-    # Se ejecuta de forma automática cada 4 horas
+    # Se ejecuta automáticamente cada 4 horas
     - cron: '0 */4 * * *'
   workflow_dispatch:
-    # Habilita el botón de ejecución manual en la app móvil de GitHub
+    # Permite la ejecución manual mediante un botón en la app móvil
 
 jobs:
   build-and-run:
@@ -29,4 +29,5 @@ jobs:
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
       run: python scraper.py
