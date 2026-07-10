@@ -1,0 +1,32 @@
+name: Sports Betting Scraping Bot
+
+on:
+  schedule:
+    # Se ejecuta automáticamente cada 6 horas (puedes ajustar el cron)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # Permite ejecutar el bot manualmente desde la app móvil o web de GitHub
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Descargar repositorio
+      uses: actions/checkout@v4
+
+    - name: Configurar entorno Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Ejecutar Scraping Bot
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.secrets.TELEGRAM_CHAT_ID }}
+      run: python scraper.py
